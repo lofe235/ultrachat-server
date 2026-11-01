@@ -1,0 +1,10 @@
+node_modules
+data
+apk
+bore-bin
+lt-bin
+*.zip
+*.exe
+*.apk
+*.log
+public-url*.txt

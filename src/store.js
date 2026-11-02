@@ -146,6 +146,66 @@ class Store {
   }
 
   /**
+   * Помечает прочитанными входящие сообщения от peer до отметки upTo.
+   * Возвращает верхнюю границу реально прочитанных сообщений, чтобы
+   * отправитель мог обновить галочки.
+   */
+  markRead({ userId, peer, upTo }) {
+    const limit = Number(upTo);
+    if (!Number.isFinite(limit) || limit <= 0) return { changed: 0, upTo: 0 };
+    const now = Date.now();
+    let changed = 0;
+    let highest = 0;
+    for (const message of this.db.messages) {
+      if (message.from !== peer || message.to !== userId) continue;
+      if (message.ts > limit) continue;
+      if (!message.readAt) {
+        message.readAt = now;
+        changed += 1;
+      }
+      if (message.ts > highest) highest = message.ts;
+    }
+    if (changed > 0) this.scheduleSave();
+    return { changed, upTo: highest };
+  }
+
+  /** Редактирование своего текстового сообщения. */
+  editMessage({ userId, id, text }) {
+    const message = this.db.messages.find((item) => item.id === id);
+    if (!message || message.from !== userId || message.kind !== 'text') return null;
+    message.text = text;
+    message.editedAt = Date.now();
+    this.scheduleSave();
+    return message;
+  }
+
+  /** Удаление своего сообщения. Возвращает удалённую запись для очистки медиа. */
+  deleteMessage({ userId, id }) {
+    const index = this.db.messages.findIndex(
+      (item) => item.id === id && item.from === userId,
+    );
+    if (index < 0) return null;
+    const [message] = this.db.messages.splice(index, 1);
+    this.scheduleSave();
+    return message;
+  }
+
+  /** Удаление всей переписки между двумя пользователями (для обоих). */
+  deleteConversation({ userId, peer }) {
+    const removed = [];
+    this.db.messages = this.db.messages.filter((message) => {
+      const match = (
+        (message.from === userId && message.to === peer) ||
+        (message.from === peer && message.to === userId)
+      );
+      if (match) removed.push(message);
+      return !match;
+    });
+    if (removed.length > 0) this.scheduleSave();
+    return removed;
+  }
+
+  /**
    * История либо общего чата (peer = null), либо личной переписки.
    * Возвращает сообщения от старых к новым.
    */

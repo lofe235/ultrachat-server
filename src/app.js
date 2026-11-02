@@ -583,6 +583,18 @@ function createApp(options = {}) {
       case 'typing':
         handleTyping(ws, frame);
         break;
+      case 'read':
+        handleRead(ws, frame);
+        break;
+      case 'edit':
+        handleEdit(ws, frame);
+        break;
+      case 'delete':
+        handleDelete(ws, frame);
+        break;
+      case 'delete_chat':
+        handleDeleteChat(ws, frame);
+        break;
       case 'ping':
         send(ws, { v: VERSION, type: 'pong', ts: frame.ts || Date.now() });
         break;
@@ -713,6 +725,8 @@ function createApp(options = {}) {
       kind,
       image: imagePath,
       ts,
+      readAt: 0,
+      editedAt: 0,
     };
     store.addMessage(message);
 
@@ -765,6 +779,138 @@ function createApp(options = {}) {
     }
   }
 
+  function handleRead(ws, frame) {
+    const peer = frame.peer ? String(frame.peer).slice(0, 64) : '';
+    if (!peer || peer === ws.user.id) return;
+    if (!store.getUser(peer)) {
+      return send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'unknown_user',
+        message: 'Пользователь не найден',
+      });
+    }
+    const result = store.markRead({
+      userId: ws.user.id,
+      peer,
+      upTo: frame.upTo,
+    });
+    if (result.changed === 0) return;
+    const payload = {
+      v: VERSION,
+      type: 'read',
+      peer: ws.user.id,
+      upTo: result.upTo,
+      at: Date.now(),
+    };
+    for (const target of online.get(peer) || []) {
+      if (target.readyState === WebSocket.OPEN) send(target, payload);
+    }
+  }
+
+  function handleEdit(ws, frame) {
+    const id = frame.id ? String(frame.id).slice(0, 96) : '';
+    const text = String(frame.text || '').trim().slice(0, MAX_TEXT);
+    if (!id || !text) {
+      return send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'empty_text',
+        message: 'Пустое сообщение',
+      });
+    }
+    const message = store.editMessage({ userId: ws.user.id, id, text });
+    if (!message) {
+      return send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'message_not_editable',
+        message: 'Это сообщение нельзя изменить',
+      });
+    }
+    const payload = {
+      v: VERSION,
+      type: 'edit',
+      id: message.id,
+      text: message.text,
+      editedAt: message.editedAt,
+      from: message.from,
+      to: message.to,
+    };
+    if (message.to) {
+      for (const userId of new Set([message.from, message.to])) {
+        for (const target of online.get(userId) || []) {
+          if (target.readyState === WebSocket.OPEN) send(target, payload);
+        }
+      }
+    } else {
+      broadcast(payload);
+    }
+  }
+
+  function handleDelete(ws, frame) {
+    const id = frame.id ? String(frame.id).slice(0, 96) : '';
+    if (!id) return;
+    const message = store.deleteMessage({ userId: ws.user.id, id });
+    if (!message) {
+      return send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'message_not_found',
+        message: 'Сообщение уже удалено',
+      });
+    }
+    removeMedia(message.image);
+    const payload = {
+      v: VERSION,
+      type: 'delete',
+      id: message.id,
+      from: message.from,
+      to: message.to,
+    };
+    if (message.to) {
+      for (const userId of new Set([message.from, message.to])) {
+        for (const target of online.get(userId) || []) {
+          if (target.readyState === WebSocket.OPEN) send(target, payload);
+        }
+      }
+    } else {
+      broadcast(payload);
+    }
+  }
+
+  function handleDeleteChat(ws, frame) {
+    const peer = frame.peer ? String(frame.peer).slice(0, 64) : '';
+    if (!peer || peer === ws.user.id) return;
+    if (!store.getUser(peer)) {
+      return send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'unknown_user',
+        message: 'Пользователь не найден',
+      });
+    }
+    const removed = store.deleteConversation({ userId: ws.user.id, peer });
+    for (const message of removed) removeMedia(message.image);
+    // Инициатор уже очистил чат локально. Собеседнику сообщаем отдельно,
+    // чтобы его копия истории тоже исчезла.
+    const payload = { v: VERSION, type: 'chat_deleted', peer: ws.user.id };
+    for (const target of online.get(peer) || []) {
+      if (target.readyState === WebSocket.OPEN) send(target, payload);
+    }
+  }
+
+  function removeMedia(imagePath) {
+    if (typeof imagePath !== 'string' || !imagePath.startsWith('/media/')) return;
+    const name = path.basename(imagePath);
+    if (!/^[a-z0-9_-]+\.(jpg|png|webp)$/i.test(name)) return;
+    try {
+      fs.unlinkSync(path.join(mediaDir, name));
+    } catch {
+      /* файл мог быть уже удалён */
+    }
+  }
+
   function publicMessage(message) {
     return {
       v: VERSION,
@@ -778,6 +924,8 @@ function createApp(options = {}) {
       kind: message.kind === 'image' ? 'image' : 'text',
       image: message.image || null,
       ts: message.ts,
+      readAt: message.readAt || 0,
+      editedAt: message.editedAt || 0,
     };
   }
 

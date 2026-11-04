@@ -4,948 +4,247 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e1621">
-<title>UltraChat — онлайн</title>
-<style>
-  :root {
-    --bg: #0e1621;
-    --panel: #17212b;
-    --panel-2: #1c2733;
-    --line: rgba(255, 255, 255, 0.07);
-    --text: #e9edf2;
-    --muted: #7d8e9e;
-    --muted-2: #5c6f80;
-    --accent: #2aabee;
-    --accent-soft: rgba(42, 171, 238, 0.14);
-    --bubble-out: #2b5278;
-    --bubble-in: #182533;
-    --gold: #e8b85c;
-    --danger: #e05a5a;
-    --ok: #43b581;
-    --radius: 14px;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    font-size: 15px;
-    overflow: hidden;
-  }
-  button, input, textarea { font: inherit; color: inherit; }
-  button { cursor: pointer; }
-  .hidden { display: none !important; }
-
-  .screen {
-    height: 100dvh;
-    max-width: 860px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg);
-    border-left: 1px solid var(--line);
-    border-right: 1px solid var(--line);
-  }
-
-  /* ---------- login ---------- */
-  #login {
-    justify-content: center;
-    align-items: center;
-    padding: 28px 22px calc(28px + env(safe-area-inset-bottom));
-  }
-  .logo {
-    width: 84px; height: 84px; border-radius: 50%;
-    display: grid; place-items: center;
-    background: radial-gradient(circle at 30% 25%, #57c3ff, #2aabee 55%, #1673a8);
-    font-size: 30px; font-weight: 700; letter-spacing: 1px;
-    box-shadow: 0 18px 44px rgba(42, 171, 238, 0.28);
-    margin-bottom: 20px;
-  }
-  .login-title { font-size: 30px; font-weight: 700; margin: 0 0 6px; }
-  .login-sub { color: var(--muted); margin: 0 0 28px; text-align: center; line-height: 1.45; max-width: 340px; }
-  .login-card {
-    width: 100%; max-width: 380px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    padding: 20px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-  }
-  .field-label { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-  .nickname-wrap { position: relative; }
-  .nickname-wrap input {
-    width: 100%;
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 13px 52px 13px 14px;
-    outline: none;
-    font-size: 16px;
-  }
-  .nickname-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .counter { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--muted-2); font-size: 12px; }
-  .primary {
-    width: 100%; margin-top: 14px;
-    border: 0; border-radius: 12px;
-    padding: 13px 16px;
-    background: var(--accent);
-    color: #fff; font-weight: 600; font-size: 16px;
-    transition: filter 0.15s, transform 0.05s;
-  }
-  .primary:active { transform: scale(0.99); }
-  .primary:disabled { filter: grayscale(0.4) brightness(0.7); cursor: default; }
-  .login-note { margin-top: 14px; color: var(--muted-2); font-size: 12px; line-height: 1.5; text-align: center; }
-  .login-note code { color: var(--muted); }
-  .apk-link {
-    display: inline-flex; align-items: center; gap: 8px;
-    margin-top: 18px; padding: 10px 16px;
-    border: 1px solid var(--line); border-radius: 999px;
-    background: var(--panel); color: var(--accent);
-    text-decoration: none; font-size: 14px;
-  }
-
-  /* ---------- app header ---------- */
-  header {
-    display: flex; align-items: center; gap: 12px;
-    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
-    border-bottom: 1px solid var(--line);
-    background: rgba(14, 22, 33, 0.92);
-    backdrop-filter: blur(12px);
-    flex: none;
-  }
-  .avatar {
-    width: 42px; height: 42px; border-radius: 50%;
-    display: grid; place-items: center;
-    font-weight: 700; font-size: 16px;
-    background: linear-gradient(145deg, #2f6f9e, #24557c);
-    color: #fff; flex: none;
-  }
-  .avatar.small { width: 30px; height: 30px; font-size: 12px; }
-  .avatar.gold { background: linear-gradient(145deg, #b98a3e, #8a6327); color: #fff5d6; }
-  .who { min-width: 0; flex: 1; }
-  .who-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .who-sub { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; margin-top: 2px; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
-  .dot.off { background: var(--muted-2); }
-  .icon-btn {
-    border: 0; background: transparent; color: var(--muted);
-    width: 38px; height: 38px; border-radius: 50%;
-    display: grid; place-items: center; flex: none;
-  }
-  .icon-btn:hover { background: rgba(255,255,255,0.05); color: var(--text); }
-  .icon-btn svg { width: 20px; height: 20px; }
-
-  /* ---------- conversation chips ---------- */
-  .chips {
-    display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-    scrollbar-width: none; flex: none;
-    background: var(--bg);
-  }
-  .chips::-webkit-scrollbar { display: none; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 7px;
-    border: 1px solid var(--line); background: var(--panel);
-    color: var(--text); border-radius: 999px;
-    padding: 6px 12px 6px 7px; white-space: nowrap; flex: none;
-    font-size: 13px; max-width: 210px;
-  }
-  .chip.active { border-color: var(--accent); background: var(--accent-soft); }
-  .chip .name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-  .chip .dot { width: 6px; height: 6px; }
-  .chip.offline { opacity: 0.55; }
-  .badge {
-    min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
-    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
-    display: grid; place-items: center; margin-left: 2px;
-  }
-
-  /* ---------- messages ---------- */
-  main {
-    flex: 1; overflow-y: auto; padding: 14px 14px 8px;
-    scroll-behavior: smooth;
-    background:
-      radial-gradient(900px 400px at 20% -10%, rgba(42, 171, 238, 0.06), transparent 60%),
-      radial-gradient(700px 500px at 100% 110%, rgba(155, 126, 222, 0.05), transparent 60%);
-  }
-  .empty {
-    height: 100%; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 10px;
-    color: var(--muted); text-align: center; padding: 20px;
-  }
-  .empty .big { font-size: 40px; opacity: 0.7; }
-  .empty h2 { margin: 0; color: var(--text); font-size: 19px; }
-  .empty p { margin: 0; max-width: 300px; line-height: 1.45; font-size: 14px; }
-  .msg-row { display: flex; margin: 3px 0; }
-  .msg-row.mine { justify-content: flex-end; }
-  .bubble {
-    max-width: min(76%, 520px);
-    background: var(--bubble-in);
-    border-radius: 14px 14px 14px 5px;
-    padding: 7px 11px 6px;
-    box-shadow: 0 1px 1px rgba(0,0,0,0.18);
-    position: relative;
-    overflow-wrap: anywhere;
-  }
-  .msg-row.mine .bubble {
-    background: var(--bubble-out);
-    border-radius: 14px 14px 5px 14px;
-  }
-  .sender { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
-  .sender.creator { color: var(--gold); }
-  .bubble .text { white-space: pre-wrap; line-height: 1.38; }
-  .bubble .chat-image {
-    display: block; max-width: min(260px, 60vw); max-height: 320px;
-    border-radius: 10px; margin: 2px 0 3px;
-  }
-  .meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; color: rgba(233, 237, 242, 0.45); font-size: 11px; }
-  .meta .ticks { color: rgba(233, 237, 242, 0.55); letter-spacing: -2px; }
-  .meta .ticks.delivered { color: #7fd0ff; }
-  .date-sep { text-align: center; margin: 14px 0 10px; color: var(--muted-2); font-size: 12px; }
-  .date-sep span { background: rgba(23, 33, 43, 0.9); border-radius: 999px; padding: 3px 10px; }
-
-  /* ---------- composer ---------- */
-  .composer {
-    flex: none; display: flex; align-items: flex-end; gap: 8px;
-    padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line);
-    background: rgba(14, 22, 33, 0.96);
-  }
-  .composer textarea {
-    flex: 1; resize: none; border: 1px solid var(--line);
-    background: var(--panel); border-radius: 20px;
-    padding: 10px 14px; outline: none; max-height: 120px;
-    line-height: 1.35; min-height: 42px;
-  }
-  .composer textarea:focus { border-color: rgba(42, 171, 238, 0.55); }
-  .send {
-    width: 44px; height: 44px; border-radius: 50%; border: 0;
-    background: var(--accent); color: #fff; display: grid; place-items: center;
-    flex: none; transition: filter 0.15s, transform 0.05s;
-  }
-  .send:active { transform: scale(0.95); }
-  .send:disabled { filter: grayscale(0.6) brightness(0.6); }
-  .send svg { width: 20px; height: 20px; margin-left: 2px; }
-
-  #toast {
-    position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom));
-    transform: translateX(-50%) translateY(10px);
-    background: #24303d; color: var(--text);
-    border: 1px solid var(--line); border-radius: 10px;
-    padding: 9px 14px; font-size: 13px; max-width: 90vw;
-    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
-    z-index: 50; text-align: center;
-  }
-  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  #toast.error { border-color: rgba(224, 90, 90, 0.45); }
-
-  @media (min-width: 700px) {
-    main { padding: 18px 22px 10px; }
-    .bubble { max-width: 62%; }
-  }
-</style>
+<title>UltraChat — мессенджер</title>
+<link rel="stylesheet" href="/public/app.css?v=3">
 </head>
-<body>
+<body data-bubble="rounded" data-density="comfortable">
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3H7l-4 3v-7A8.4 8.4 0 0 1 11.5 3h1A8.4 8.4 0 0 1 21 11.5z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 7l4 4 5-7 5 7 4-4-2 12H5L3 7z"/><path d="M5 21h14"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+  <symbol id="i-bluetooth" viewBox="0 0 24 24"><path d="m7 7 10 10-5 4V3l5 4L7 17"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-vibrate" viewBox="0 0 24 24"><rect x="8" y="4" width="8" height="16" rx="2"/><path d="M4 9v6M20 9v6M2 11v2M22 11v2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 3 14h8l-1 8 11-13h-8l1-7z"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 1.7-3l-.2-.3a2 2 0 0 1 1.7-3H19a2 2 0 0 0 2-2A9 9 0 0 0 12 3z"/><circle cx="7.5" cy="11.5" r=".8"/><circle cx="10" cy="7.5" r=".8"/><circle cx="15" cy="7.5" r=".8"/></symbol>
+  <symbol id="i-wallpaper" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6.5 8-6.5s8 2.5 8 6.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7z"/><path d="M22 2 11 13"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L5 20"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></symbol>
+  <symbol id="i-checks" viewBox="0 0 24 24"><path d="M2 12.5 7 17.5 17 6.5"/><path d="m11 12.5 4.5 5L22 10.5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></symbol>
+  <symbol id="i-megaphone" viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M14 8a5 5 0 0 1 0 8M17 5a9 9 0 0 1 0 14"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c0-3.3 2.9-5.4 6.5-5.4s6.5 2.1 6.5 5.4"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.6M18 14.9c2.2.6 3.5 2.3 3.5 5.1"/></symbol>
+</svg>
 
-<section id="login" class="screen">
-  <div class="logo">UC</div>
-  <h1 class="login-title">UltraChat</h1>
-  <p class="login-sub">Онлайн-версия. Общий чат и личные сообщения через сервер — с любого устройства.</p>
-  <form class="login-card" id="login-form" autocomplete="off">
-    <label class="field-label" for="nickname">Ваше имя</label>
-    <div class="nickname-wrap">
-      <input id="nickname" maxlength="24" placeholder="Например, Алекс" required>
-      <span class="counter" id="nickname-counter">0/24</span>
+<!-- ==================== Создание аккаунта ==================== -->
+<div id="onboarding" class="onboarding hidden">
+  <div class="onboard-card">
+    <header class="onboard-head">
+      <div class="logo-mark" id="onboard-logo"><svg class="i"><use href="#i-chat"></use></svg></div>
+      <div class="onboard-brand">UltraChat</div>
+      <button class="icon-btn" id="onboard-settings" type="button" aria-label="Оформление" title="Оформление">
+        <svg class="i"><use href="#i-palette"></use></svg>
+      </button>
+    </header>
+    <div class="step-dots" id="step-dots" aria-hidden="true"></div>
+    <div class="signup-stage" id="signup-stage"></div>
+    <div class="signup-error hidden" id="signup-error"></div>
+    <button class="primary-btn" id="signup-next" type="button"></button>
+    <div class="signup-foot"><span>UltraChat</span><span>1.7.2 web</span></div>
+  </div>
+</div>
+
+<!-- ==================== Основное приложение ==================== -->
+<div id="shell" class="shell hidden">
+  <aside class="sidebar">
+    <header class="discover-head">
+      <button class="avatar-hit" id="me-button" type="button" aria-label="Открыть профиль"></button>
+      <div class="discover-title">
+        <h1>UltraChat</h1>
+        <div class="conn-line">
+          <span class="status-dot" id="conn-dot"></span>
+          <span id="conn-text">Подключение к серверу…</span>
+        </div>
+      </div>
+      <button class="icon-btn accent-icon" id="add-contact-btn" type="button" aria-label="Добавить собеседника" title="Добавить собеседника">
+        <svg class="i"><use href="#i-plus"></use></svg>
+      </button>
+      <button class="icon-btn" id="open-settings" type="button" aria-label="Настройки" title="Настройки">
+        <svg class="i"><use href="#i-settings"></use></svg>
+      </button>
+    </header>
+
+    <div class="warning hidden" id="server-warning">
+      <svg class="i"><use href="#i-server"></use></svg>
+      <span>Укажите адрес сервера в настройках — без него чаты не работают.</span>
     </div>
-    <button class="primary" id="login-btn" type="submit">Войти в чат</button>
-    <div class="login-note">Сервер: <code id="server-host">—</code></div>
+
+    <div class="threads-head">
+      <span>Чаты</span>
+      <span id="threads-count"></span>
+    </div>
+    <div class="threads" id="threads"></div>
+
+    <div class="server-banner hidden" id="server-banner">
+      <span class="spinner"></span>
+      <span id="server-banner-text">Подключение к серверу…</span>
+    </div>
+    <div class="sidebar-foot" id="sidebar-foot"></div>
+  </aside>
+
+  <main class="main">
+    <section class="empty-pane" id="empty-view">
+      <div class="empty-badge"><svg class="i"><use href="#i-chat"></use></svg></div>
+      <h2>Выберите чат</h2>
+      <p>Откройте переписку слева или найдите человека по нику.</p>
+      <button class="primary-btn compact-btn" id="empty-add" type="button">
+        <svg class="i"><use href="#i-plus"></use></svg><span>Добавить собеседника</span>
+      </button>
+    </section>
+
+    <section class="view chat-view hidden" id="chat-view">
+      <div class="wallpaper" id="chat-wallpaper" data-wallpaper="default"></div>
+      <div class="chat-inner">
+        <header class="chat-head">
+          <button class="icon-btn" id="chat-back" type="button" aria-label="Назад к чатам">
+            <svg class="i"><use href="#i-back"></use></svg>
+          </button>
+          <span class="chat-avatar" id="chat-avatar"></span>
+          <div class="chat-peer">
+            <div class="chat-title" id="chat-title">Собеседник</div>
+            <div class="chat-status" id="chat-status">
+              <svg class="i"><use href="#i-server"></use></svg>
+              <span id="chat-status-text">Сервер</span>
+            </div>
+          </div>
+          <button class="icon-btn chat-delete-btn" id="chat-delete" type="button" aria-label="Удалить чат" title="Удалить чат">
+            <svg class="i"><use href="#i-trash"></use></svg>
+          </button>
+          <button class="icon-btn" id="chat-settings" type="button" aria-label="Настройки" title="Настройки">
+            <svg class="i"><use href="#i-settings"></use></svg>
+          </button>
+        </header>
+        <div class="chat-banner hidden" id="chat-banner">
+          <svg class="i"><use href="#i-bolt"></use></svg>
+          <span id="chat-banner-text"></span>
+          <button class="banner-close" id="chat-banner-close" type="button" aria-label="Скрыть">
+            <svg class="i"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <div class="messages" id="messages"></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <button class="round-btn" id="attach-btn" type="button" aria-label="Прикрепить фото" title="Прикрепить фото">
+            <svg class="i"><use href="#i-image"></use></svg>
+          </button>
+          <textarea id="message-input" rows="1" maxlength="4000" placeholder="Сообщение" enterkeyhint="send"></textarea>
+          <button class="send-btn" id="send-btn" type="submit" aria-label="Отправить" title="Отправить">
+            <svg class="i"><use href="#i-send"></use></svg>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <section class="view settings-view hidden" id="settings-view"></section>
+    <section class="view profile-view hidden" id="profile-view"></section>
+  </main>
+</div>
+
+<!-- ==================== Уведомление об обновлении ==================== -->
+<div class="notice-banner hidden" id="notice-banner" role="status">
+  <span class="notice-icon"><svg class="i"><use href="#i-megaphone"></use></svg></span>
+  <div class="notice-copy">
+    <div class="notice-title" id="notice-title"></div>
+    <div class="notice-text" id="notice-text"></div>
+  </div>
+  <a class="notice-action hidden" id="notice-action" href="#" target="_blank" rel="noopener">Обновить</a>
+  <button class="notice-close" id="notice-close" type="button" aria-label="Скрыть уведомление">
+    <svg class="i"><use href="#i-close"></use></svg>
+  </button>
+</div>
+
+<!-- ==================== Скрытый вход администратора ==================== -->
+<div class="modal-layer hidden" id="admin-login">
+  <form class="dialog admin-login-card" id="admin-login-form" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="admin-login-title">
+    <div class="admin-login-icon"><svg class="i"><use href="#i-shield"></use></svg></div>
+    <h2 id="admin-login-title">Панель управления</h2>
+    <p class="dialog-sub">Доступ только для администратора UltraChat.</p>
+    <label class="field">
+      <svg class="i"><use href="#i-lock"></use></svg>
+      <input id="admin-password" type="password" placeholder="Пароль" autocomplete="current-password" maxlength="128" autofocus>
+    </label>
+    <div class="field-help error hidden" id="admin-login-error"></div>
+    <div class="dialog-actions">
+      <button class="text-btn muted" id="admin-login-close" type="button">Отмена</button>
+      <button class="text-btn danger" id="admin-login-submit" type="submit">Войти</button>
+    </div>
   </form>
-  <a class="apk-link hidden" id="apk-link" href="/download/UltraChat.apk" download>
-    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-    Скачать UltraChat для Android
-  </a>
-</section>
+</div>
 
-<section id="app" class="screen hidden">
-  <header>
-    <div class="avatar" id="me-avatar">?</div>
-    <div class="who">
-      <div class="who-name" id="me-name">—</div>
-      <div class="who-sub"><span class="dot" id="conn-dot"></span><span id="conn-label">подключение…</span></div>
+<!-- ==================== Панель администратора ==================== -->
+<section class="admin-panel hidden" id="admin-panel" aria-label="Панель администратора">
+  <header class="admin-head">
+    <div class="admin-brand">
+      <span class="admin-brand-icon"><svg class="i"><use href="#i-shield"></use></svg></span>
+      <div>
+        <h1>UltraChat Admin</h1>
+        <p id="admin-subtitle">Управление сервером</p>
+      </div>
     </div>
-    <button class="icon-btn" id="logout" title="Выйти" aria-label="Выйти">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
-    </button>
+    <div class="admin-head-actions">
+      <button class="admin-btn" type="button" data-action="admin-refresh">
+        <svg class="i"><use href="#i-refresh"></use></svg><span>Обновить</span>
+      </button>
+      <button class="admin-btn danger" type="button" data-action="admin-logout">
+        <svg class="i"><use href="#i-lock"></use></svg><span>Выйти</span>
+      </button>
+      <button class="admin-btn" type="button" data-action="admin-close" aria-label="Закрыть панель">
+        <svg class="i"><use href="#i-close"></use></svg><span>Закрыть</span>
+      </button>
+    </div>
   </header>
-
-  <div class="chips" id="chips"></div>
-  <main id="messages"></main>
-
-  <form class="composer" id="composer" autocomplete="off">
-    <textarea id="input" rows="1" maxlength="4000" placeholder="Сообщение…"></textarea>
-    <button class="send" id="send" type="submit" aria-label="Отправить">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 21.9 12 3.4 3.6l.1 6.4L15 12 3.5 14z"/></svg>
-    </button>
-  </form>
+  <div class="admin-scroll" id="admin-body"></div>
 </section>
 
-<div id="toast"></div>
-
-<script>
-(() => {
-  'use strict';
-
-  const VERSION = 1;
-  const LOBBY = 'lobby';
-  const $ = (id) => document.getElementById(id);
-
-  const state = {
-    token: localStorage.getItem('uc_token') || '',
-    deviceId: localStorage.getItem('uc_device') || '',
-    nickname: localStorage.getItem('uc_nickname') || '',
-    me: null,
-    users: [],
-    peer: null,          // null = общий чат, иначе userId
-    conversations: new Map(),
-    unread: new Map(),
-    pending: new Set(),
-    ws: null,
-    retry: 0,
-    retryTimer: null,
-    stopped: false,
-    typingTimer: null,
-    lastTypingSent: 0,
-    typingPeer: null,
-    typingHideTimer: null,
-  };
-
-  // ------------------------------------------------------------------
-  // Утилиты
-  // ------------------------------------------------------------------
-
-  function deviceId() {
-    if (!state.deviceId) {
-      state.deviceId = (crypto.randomUUID && crypto.randomUUID()) ||
-        ('dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
-      localStorage.setItem('uc_device', state.deviceId);
-    }
-    return state.deviceId;
-  }
-
-  function initials(name) {
-    const clean = String(name || '').replace('[Создатель]', '').trim();
-    if (!clean) return 'UC';
-    return clean.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || 'UC';
-  }
-
-  function avatarEl(name, creator, small) {
-    const el = document.createElement('div');
-    el.className = 'avatar' + (small ? ' small' : '') + (creator ? ' gold' : '');
-    el.textContent = initials(name);
-    return el;
-  }
-
-  function timeLabel(ts) {
-    return new Date(ts).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  }
-
-  function dayLabel(ts) {
-    const d = new Date(ts);
-    const today = new Date();
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
-    const same = (a, b) => a.toDateString() === b.toDateString();
-    if (same(d, today)) return 'Сегодня';
-    if (same(d, yesterday)) return 'Вчера';
-    return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-  }
-
-  let toastTimer = null;
-  function toast(text, isError) {
-    const el = $('toast');
-    el.textContent = text;
-    el.className = 'show' + (isError ? ' error' : '');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.className = ''; }, 3200);
-  }
-
-  function send(frame) {
-    const ws = state.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    try {
-      ws.send(JSON.stringify({ v: VERSION, ...frame }));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Авторизация
-  // ------------------------------------------------------------------
-
-  async function register(nickname) {
-    const response = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceId: deviceId(),
-        nickname,
-        avatarId: 'initials',
-        token: state.token || undefined,
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error === 'rate_limited' ? 'Слишком много попыток. Подождите минуту.' : 'Сервер отклонил вход');
-    }
-    state.token = data.token;
-    state.me = data;
-    localStorage.setItem('uc_token', data.token);
-    localStorage.setItem('uc_nickname', data.nickname);
-    return data;
-  }
-
-  async function login(nickname) {
-    const btn = $('login-btn');
-    btn.disabled = true;
-    btn.textContent = 'Подключаюсь…';
-    try {
-      await register(nickname);
-      $('login').classList.add('hidden');
-      $('app').classList.remove('hidden');
-      updateMe();
-      connect();
-    } catch (err) {
-      toast(err.message || 'Не удалось войти', true);
-      btn.disabled = false;
-      btn.textContent = 'Войти в чат';
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // WebSocket
-  // ------------------------------------------------------------------
-
-  function wsUrl() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/ws?token=${encodeURIComponent(state.token)}`;
-  }
-
-  function connect() {
-    if (state.stopped || !state.token) return;
-    clearTimeout(state.retryTimer);
-    setConn('connecting');
-    let ws;
-    try {
-      ws = new WebSocket(wsUrl());
-    } catch {
-      scheduleReconnect();
-      return;
-    }
-    state.ws = ws;
-
-    ws.onopen = () => {
-      state.retry = 0;
-      setConn('online');
-      sendHello();
-    };
-
-    ws.onmessage = (event) => {
-      let frame;
-      try { frame = JSON.parse(event.data); } catch { return; }
-      if (!frame || frame.v !== VERSION) return;
-      handleFrame(frame);
-    };
-
-    ws.onclose = (event) => {
-      if (state.ws === ws) state.ws = null;
-      setConn('offline');
-      if (event && event.code === 4003) {
-        // Токен от другого устройства — регистрируемся заново.
-        state.token = '';
-        localStorage.removeItem('uc_token');
-      }
-      if (!state.stopped) scheduleReconnect();
-    };
-
-    ws.onerror = () => {
-      try { ws.close(); } catch { /* ignore */ }
-    };
-  }
-
-  function scheduleReconnect() {
-    if (state.stopped) return;
-    clearTimeout(state.retryTimer);
-    const delay = Math.min(15000, 700 * Math.pow(1.7, state.retry));
-    state.retry += 1;
-    state.retryTimer = setTimeout(async () => {
-      if (!state.token && state.nickname) {
-        try {
-          await register(state.nickname);
-          updateMe();
-        } catch {
-          scheduleReconnect();
-          return;
-        }
-      }
-      connect();
-    }, delay);
-  }
-
-  function sendHello() {
-    const me = state.me;
-    if (!me) return;
-    send({
-      type: 'hello',
-      deviceId: deviceId(),
-      nickname: me.nickname,
-      displayName: me.displayName,
-      creator: !!me.creator,
-      avatar: me.avatarId || 'initials',
-      model: navigator.platform || 'web',
-      ts: Date.now(),
-    });
-  }
-
-  function setConn(mode) {
-    const dot = $('conn-dot');
-    const label = $('conn-label');
-    if (!dot) return;
-    if (mode === 'online') {
-      dot.classList.remove('off');
-      label.textContent = 'на связи';
-    } else if (mode === 'connecting') {
-      dot.classList.add('off');
-      label.textContent = 'подключение…';
-    } else {
-      dot.classList.add('off');
-      label.textContent = 'нет связи — переподключаюсь';
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Кадры сервера
-  // ------------------------------------------------------------------
-
-  function handleFrame(frame) {
-    switch (frame.type) {
-      case 'welcome':
-        state.me = {
-          ...(state.me || {}),
-          userId: frame.userId,
-          nickname: frame.nickname,
-          displayName: frame.displayName,
-          creator: frame.creator,
-          avatarId: frame.avatar,
-        };
-        updateMe();
-        break;
-      case 'roster':
-        state.users = Array.isArray(frame.users) ? frame.users : [];
-        renderChips();
-        break;
-      case 'history':
-        applyHistory(frame);
-        break;
-      case 'chat':
-        applyChat(frame);
-        break;
-      case 'ack':
-        state.pending.delete(frame.id);
-        updateTicks(frame.id, true);
-        break;
-      case 'typing':
-        if (frame.from === state.peer) showTyping();
-        break;
-      case 'pong':
-        break;
-      case 'error':
-        if (frame.code === 'hello_required') sendHello();
-        else if (frame.code === 'rate_limited') toast(frame.message || 'Слишком часто', true);
-        else if (frame.code === 'unknown_user') {
-          toast('Пользователь больше не доступен', true);
-          openConversation(null);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  function conversationKey(frame) {
-    if (frame.to === null || frame.to === undefined) return LOBBY;
-    return frame.from === state.me.userId ? frame.to : frame.from;
-  }
-
-  function ensureConversation(key) {
-    if (!state.conversations.has(key)) state.conversations.set(key, []);
-    return state.conversations.get(key);
-  }
-
-  function applyHistory(frame) {
-    const key = frame.peer === LOBBY || !frame.peer ? LOBBY : frame.peer;
-    const list = Array.isArray(frame.messages) ? frame.messages : [];
-    const mapped = list.map((m) => normalizeMessage(m));
-    const existing = ensureConversation(key);
-    const merged = [...mapped, ...existing]
-      .reduce((acc, m) => {
-        if (!acc.some((x) => x.id === m.id)) acc.push(m);
-        return acc;
-      }, [])
-      .sort((a, b) => a.ts - b.ts);
-    state.conversations.set(key, merged);
-    if (activeKey() === key) renderMessages();
-  }
-
-  function normalizeMessage(m) {
-    return {
-      id: m.id,
-      from: m.from,
-      to: m.to,
-      sender: m.sender,
-      creator: !!m.creator,
-      text: m.text,
-      ts: m.ts,
-      mine: m.from === state.me.userId,
-    };
-  }
-
-  function applyChat(frame) {
-    const key = conversationKey(frame);
-    const list = ensureConversation(key);
-    if (list.some((m) => m.id === frame.id)) return;
-    list.push(normalizeMessage(frame));
-    list.sort((a, b) => a.ts - b.ts);
-    if (activeKey() === key) {
-      renderMessages();
-    } else {
-      state.unread.set(key, (state.unread.get(key) || 0) + 1);
-      renderChips();
-    }
-  }
-
-  function updateTicks(id, delivered) {
-    const rows = document.querySelectorAll(`[data-msg-id="${CSS.escape(id)}"] .ticks`);
-    rows.forEach((el) => {
-      el.textContent = delivered ? '✓✓' : '✓';
-      el.classList.toggle('delivered', !!delivered);
-    });
-  }
-
-  // ------------------------------------------------------------------
-  // Отрисовка
-  // ------------------------------------------------------------------
-
-  function updateMe() {
-    const me = state.me;
-    if (!me) return;
-    const name = me.displayName || me.nickname || '—';
-    $('me-name').textContent = name;
-    $('me-name').style.color = me.creator ? 'var(--gold)' : '';
-    const av = $('me-avatar');
-    av.textContent = initials(name);
-    av.classList.toggle('gold', !!me.creator);
-  }
-
-  function activeKey() {
-    return state.peer === null ? LOBBY : state.peer;
-  }
-
-  function renderChips() {
-    const chips = $('chips');
-    chips.textContent = '';
-
-    const lobby = document.createElement('button');
-    lobby.type = 'button';
-    lobby.className = 'chip' + (state.peer === null ? ' active' : '');
-    lobby.innerHTML = '<span class="name">Общий чат</span>';
-    const lobbyBadge = state.unread.get(LOBBY) || 0;
-    if (lobbyBadge > 0) {
-      const b = document.createElement('span');
-      b.className = 'badge';
-      b.textContent = lobbyBadge > 99 ? '99+' : String(lobbyBadge);
-      lobby.appendChild(b);
-    }
-    lobby.addEventListener('click', () => openConversation(null));
-    chips.appendChild(lobby);
-
-    const others = state.users.filter((u) => u.id !== state.me.userId);
-    for (const user of others) {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'chip' + (state.peer === user.id ? ' active' : '') + (user.online ? '' : ' offline');
-      chip.appendChild(avatarEl(user.displayName || user.nickname, user.creator, true));
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = (user.displayName || user.nickname).replace('[Создатель] ', '');
-      chip.appendChild(name);
-      const dot = document.createElement('span');
-      dot.className = 'dot' + (user.online ? '' : ' off');
-      chip.appendChild(dot);
-      const unread = state.unread.get(user.id) || 0;
-      if (unread > 0) {
-        const b = document.createElement('span');
-        b.className = 'badge';
-        b.textContent = unread > 99 ? '99+' : String(unread);
-        chip.appendChild(b);
-      }
-      chip.addEventListener('click', () => openConversation(user.id));
-      chips.appendChild(chip);
-    }
-  }
-
-  function openConversation(peerId) {
-    state.peer = peerId;
-    state.unread.delete(activeKey());
-    state.typingPeer = null;
-    renderChips();
-    renderMessages();
-    requestHistory();
-    updatePlaceholder();
-  }
-
-  function updatePlaceholder() {
-    const input = $('input');
-    if (state.peer === null) {
-      input.placeholder = 'Сообщение в общий чат…';
-    } else {
-      const user = state.users.find((u) => u.id === state.peer);
-      input.placeholder = user ? `Сообщение для ${user.nickname}…` : 'Сообщение…';
-    }
-  }
-
-  function requestHistory() {
-    send({ type: 'history', peer: state.peer || LOBBY, limit: 100 });
-  }
-
-  function renderMessages() {
-    const box = $('messages');
-    box.textContent = '';
-    const key = activeKey();
-    const list = state.conversations.get(key) || [];
-
-    if (list.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      if (key === LOBBY) {
-        empty.innerHTML = '<div class="big">💬</div><h2>Общий чат</h2><p>Здесь видят сообщения все, кто сейчас в UltraChat. Напишите первым.</p>';
-      } else {
-        const user = state.users.find((u) => u.id === key);
-        empty.innerHTML = '<div class="big">✉️</div><h2>Личный чат</h2><p>Сообщения видит только собеседник. История хранится на сервере.</p>';
-        if (user) {
-          const p = document.createElement('p');
-          p.textContent = user.online ? `${user.nickname} сейчас в сети.` : `${user.nickname} не в сети — сообщение дойдёт позже.`;
-          empty.appendChild(p);
-        }
-      }
-      box.appendChild(empty);
-      return;
-    }
-
-    let lastDay = '';
-    let lastSender = '';
-    for (const msg of list) {
-      const day = dayLabel(msg.ts);
-      if (day !== lastDay) {
-        const sep = document.createElement('div');
-        sep.className = 'date-sep';
-        const span = document.createElement('span');
-        span.textContent = day;
-        sep.appendChild(span);
-        box.appendChild(sep);
-        lastDay = day;
-        lastSender = '';
-      }
-
-      const row = document.createElement('div');
-      row.className = 'msg-row' + (msg.mine ? ' mine' : '');
-      row.dataset.msgId = msg.id;
-
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-
-      if (!msg.mine && key === LOBBY && msg.sender !== lastSender) {
-        const sender = document.createElement('div');
-        sender.className = 'sender' + (msg.creator ? ' creator' : '');
-        sender.textContent = msg.sender;
-        bubble.appendChild(sender);
-      }
-      lastSender = msg.sender;
-
-      const text = document.createElement('div');
-      text.className = 'text';
-      if (msg.kind === 'image' && msg.image) {
-        const img = document.createElement('img');
-        img.className = 'chat-image';
-        img.src = msg.image;
-        img.alt = 'Фото';
-        img.loading = 'lazy';
-        bubble.appendChild(img);
-      } else {
-        text.textContent = msg.text;
-        bubble.appendChild(text);
-      }
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      const time = document.createElement('span');
-      time.textContent = timeLabel(msg.ts);
-      meta.appendChild(time);
-      if (msg.mine) {
-        const ticks = document.createElement('span');
-        ticks.className = 'ticks';
-        ticks.textContent = state.pending.has(msg.id) ? '✓' : '✓✓';
-        if (!state.pending.has(msg.id)) ticks.classList.add('delivered');
-        meta.appendChild(ticks);
-      }
-      bubble.appendChild(meta);
-      row.appendChild(bubble);
-      box.appendChild(row);
-    }
-
-    requestAnimationFrame(() => {
-      box.scrollTop = box.scrollHeight;
-    });
-  }
-
-  function showTyping() {
-    const label = $('conn-label');
-    if (!label) return;
-    label.textContent = 'печатает…';
-    clearTimeout(state.typingHideTimer);
-    state.typingHideTimer = setTimeout(() => setConn('online'), 2500);
-  }
-
-  // ------------------------------------------------------------------
-  // Отправка
-  // ------------------------------------------------------------------
-
-  function sendMessage() {
-    const input = $('input');
-    const text = input.value.trim();
-    if (!text) return;
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-      toast('Нет связи с сервером', true);
-      return;
-    }
-    const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
-    const ts = Date.now();
-    const message = {
-      id,
-      from: state.me.userId,
-      to: state.peer,
-      sender: state.me.displayName || state.me.nickname,
-      creator: !!state.me.creator,
-      text,
-      ts,
-      mine: true,
-    };
-    const key = activeKey();
-    ensureConversation(key).push(message);
-    state.pending.add(id);
-    renderMessages();
-
-    send({ type: 'chat', id, to: state.peer, text, ts });
-    input.value = '';
-    input.style.height = 'auto';
-    input.focus();
-    sendTyping(true);
-  }
-
-  function sendTyping(force) {
-    if (state.peer === null) return;
-    const now = Date.now();
-    if (!force && now - state.lastTypingSent < 2500) return;
-    state.lastTypingSent = now;
-    send({ type: 'typing', to: state.peer });
-  }
-
-  // ------------------------------------------------------------------
-  // События
-  // ------------------------------------------------------------------
-
-  $('nickname-counter').textContent = '0/24';
-  $('server-host').textContent = location.host;
-  $('nickname').addEventListener('input', (e) => {
-    $('nickname-counter').textContent = `${e.target.value.length}/24`;
-  });
-
-  $('login-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const nickname = $('nickname').value.trim().replace(/\s+/g, ' ');
-    if (!nickname) return;
-    state.nickname = nickname;
-    login(nickname);
-  });
-
-  $('composer').addEventListener('submit', (e) => {
-    e.preventDefault();
-    sendMessage();
-  });
-
-  $('input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  $('input').addEventListener('input', (e) => {
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-    sendTyping(false);
-  });
-
-  $('logout').addEventListener('click', () => {
-    state.stopped = true;
-    clearTimeout(state.retryTimer);
-    try { state.ws && state.ws.close(); } catch { /* ignore */ }
-    localStorage.removeItem('uc_token');
-    localStorage.removeItem('uc_nickname');
-    location.reload();
-  });
-
-  // ------------------------------------------------------------------
-  // Старт
-  // ------------------------------------------------------------------
-
-  async function boot() {
-    fetch('/health').then((r) => r.json()).then((data) => {
-      if (data && data.apk) $('apk-link').classList.remove('hidden');
-    }).catch(() => {});
-
-    if (state.token && state.nickname) {
-      try {
-        await register(state.nickname);
-        $('login').classList.add('hidden');
-        $('app').classList.remove('hidden');
-        updateMe();
-        connect();
-        return;
-      } catch {
-        state.token = '';
-        localStorage.removeItem('uc_token');
-      }
-    }
-    $('nickname').value = state.nickname || '';
-    $('nickname-counter').textContent = `${($('nickname').value || '').length}/24`;
-    $('nickname').focus();
-  }
-
-  window.addEventListener('online', () => { if (state.me) connect(); });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.me &&
-        (!state.ws || state.ws.readyState > 1)) {
-      state.retry = 0;
-      connect();
-    }
-  });
-
-  boot();
-})();
-</script>
+<!-- ==================== Поиск собеседника ==================== -->
+<div class="modal-layer hidden" id="add-contact-modal">
+  <div class="dialog contact-dialog" role="dialog" aria-modal="true" aria-labelledby="contact-title">
+    <h2 id="contact-title">Добавить собеседника</h2>
+    <p class="dialog-sub">Введите имя или ник — сервер найдёт совпадения.</p>
+    <label class="field search-field">
+      <svg class="i"><use href="#i-search"></use></svg>
+      <input id="contact-search" type="search" placeholder="Например, Lofer" autocomplete="off" maxlength="48">
+    </label>
+    <div class="contact-results" id="contact-results"></div>
+    <div class="dialog-actions">
+      <button class="text-btn" id="contact-close" type="button">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== Диалоги ==================== -->
+<div class="modal-layer hidden" id="dialog-root"></div>
+
+<!-- ==================== Просмотр фото ==================== -->
+<div class="lightbox hidden" id="lightbox">
+  <button class="icon-btn lightbox-close" id="lightbox-close" type="button" aria-label="Закрыть">
+    <svg class="i"><use href="#i-close"></use></svg>
+  </button>
+  <img id="lightbox-img" alt="Фото">
+</div>
+
+<input type="file" id="avatar-file" accept="image/*" class="hidden">
+<input type="file" id="photo-file" accept="image/*" class="hidden">
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="/public/app.js?v=3" defer></script>
 </body>
 </html>

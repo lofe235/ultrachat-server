@@ -10,6 +10,10 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
+function emptyBans() {
+  return { devices: [], ips: [] };
+}
+
 /**
  * Простое файловое хранилище без нативных зависимостей.
  * Запись атомарная: сначала temp-файл, затем rename.
@@ -18,7 +22,7 @@ class Store {
   constructor(dataDir) {
     this.dir = dataDir;
     this.file = path.join(dataDir, 'db.json');
-    this.db = { version: 1, users: {}, messages: [] };
+    this.db = { version: 1, users: {}, messages: [], bans: emptyBans(), notice: null };
     this.saveTimer = null;
     this.load();
   }
@@ -28,10 +32,16 @@ class Store {
       const raw = fs.readFileSync(this.file, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
+        const bans = parsed.bans && typeof parsed.bans === 'object' ? parsed.bans : {};
         this.db = {
           version: 1,
           users: parsed.users && typeof parsed.users === 'object' ? parsed.users : {},
           messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+          bans: {
+            devices: Array.isArray(bans.devices) ? bans.devices : [],
+            ips: Array.isArray(bans.ips) ? bans.ips : [],
+          },
+          notice: parsed.notice && typeof parsed.notice === 'object' ? parsed.notice : null,
         };
       }
     } catch (err) {
@@ -67,7 +77,7 @@ class Store {
    * сервер (перезапуск рвёт туннель и меняет публичный адрес).
    */
   reset() {
-    this.db = { version: 1, users: {}, messages: [] };
+    this.db = { version: 1, users: {}, messages: [], bans: emptyBans(), notice: null };
     this.saveNow();
   }
 
@@ -203,6 +213,86 @@ class Store {
     });
     if (removed.length > 0) this.scheduleSave();
     return removed;
+  }
+
+  /**
+   * Очистка общего чата (лобби). Личные переписки не затрагиваются.
+   * Возвращает удалённые сообщения, чтобы вызывающая сторона почистила фото.
+   */
+  clearLobby() {
+    const removed = [];
+    this.db.messages = this.db.messages.filter((message) => {
+      if (message.to === null) {
+        removed.push(message);
+        return false;
+      }
+      return true;
+    });
+    if (removed.length > 0) this.scheduleSave();
+    return removed;
+  }
+
+  banList() {
+    return {
+      devices: this.db.bans.devices.map((item) => ({ ...item })),
+      ips: this.db.bans.ips.map((item) => ({ ...item })),
+    };
+  }
+
+  findBan({ deviceId, ip }) {
+    if (deviceId) {
+      const found = this.db.bans.devices.find((item) => item.value === deviceId);
+      if (found) return { ...found, kind: 'device' };
+    }
+    if (ip) {
+      const found = this.db.bans.ips.find((item) => item.value === ip);
+      if (found) return { ...found, kind: 'ip' };
+    }
+    return null;
+  }
+
+  addBan({ kind, value, reason, createdAt }) {
+    const key = kind === 'ip' ? 'ips' : 'devices';
+    const list = this.db.bans[key];
+    const entry = {
+      value: String(value),
+      reason: String(reason || '').slice(0, 200),
+      createdAt: Number(createdAt) || Date.now(),
+    };
+    const index = list.findIndex((item) => item.value === entry.value);
+    if (index >= 0) list[index] = entry;
+    else {
+      list.push(entry);
+      if (list.length > 500) list.splice(0, list.length - 500);
+    }
+    this.scheduleSave();
+    return { ...entry, kind };
+  }
+
+  removeBan(kind, value) {
+    const key = kind === 'ip' ? 'ips' : 'devices';
+    const list = this.db.bans[key];
+    const before = list.length;
+    this.db.bans[key] = list.filter((item) => item.value !== value);
+    if (this.db.bans[key].length !== before) this.scheduleSave();
+    return before - this.db.bans[key].length;
+  }
+
+  setNotice(notice) {
+    this.db.notice = notice || null;
+    this.scheduleSave();
+    return this.db.notice;
+  }
+
+  getNotice() {
+    return this.db.notice || null;
+  }
+
+  clearNotice() {
+    if (!this.db.notice) return false;
+    this.db.notice = null;
+    this.scheduleSave();
+    return true;
   }
 
   /**

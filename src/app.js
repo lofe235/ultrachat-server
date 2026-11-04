@@ -2,6 +2,7 @@
 
 const http = require('node:http');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer, WebSocket } = require('ws');
@@ -18,6 +19,10 @@ const HEARTBEAT_MS = 30_000;
 const RATE_WINDOW_MS = 10_000;
 const RATE_MAX_MESSAGES = 40;
 const MAX_BODY = 64 * 1024;
+const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000;
+const NOTICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_BAN_REASON = 200;
+const MAX_ADMIN_USERS = 500;
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -136,6 +141,37 @@ function bearerToken(req) {
   return '';
 }
 
+/** Пароль администратора хранится в data/ и не попадает в публичный репозиторий. */
+function loadAdminPassword(dataDir) {
+  const file = path.join(dataDir, 'admin-password.txt');
+  try {
+    const value = fs.readFileSync(file, 'utf8').trim();
+    if (value) return value;
+  } catch {
+    /* файла ещё нет */
+  }
+  return String(process.env.ADMIN_PASSWORD || '').trim();
+}
+
+function safeEqualText(a, b) {
+  const left = Buffer.from(String(a || ''), 'utf8');
+  const right = Buffer.from(String(b || ''), 'utf8');
+  if (left.length !== right.length) return false;
+  try {
+    return crypto.timingSafeEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeNoticeUrl(raw) {
+  const value = String(raw || '').trim().slice(0, 500);
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('/') && !value.startsWith('//')) return value;
+  return '';
+}
+
 function createApp(options = {}) {
   const dataDir = options.dataDir || path.join(__dirname, '..', 'data');
   const publicDir = options.publicDir || path.join(__dirname, '..', 'public');
@@ -154,6 +190,12 @@ function createApp(options = {}) {
   );
   const store = new Store(dataDir);
   fs.mkdirSync(mediaDir, { recursive: true });
+  const adminPassword = loadAdminPassword(dataDir);
+  /** @type {Map<string, {ip: string, createdAt: number, expiresAt: number}>} */
+  const adminSessions = new Map();
+  if (!adminPassword) {
+    log('admin: пароль не задан (data/admin-password.txt или ADMIN_PASSWORD)');
+  }
 
   // Ключ администратора создаётся один раз и лежит только на этом ПК.
   // Нужен для служебной очистки базы без перезапуска сервера.
@@ -177,6 +219,7 @@ function createApp(options = {}) {
   /** @type {Map<string, Set<WebSocket>>} */
   const online = new Map();
   const ipHits = new Map();
+  const adminHits = new Map();
 
   const wss = new WebSocketServer({
     noServer: true,
@@ -217,9 +260,15 @@ function createApp(options = {}) {
       socket.destroy();
       return;
     }
+    const upgradeIp = clientIp(req);
+    if (store.findBan({ deviceId: user.deviceId, ip: upgradeIp })) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.user = user;
-      ws.remoteIp = clientIp(req);
+      ws.remoteIp = upgradeIp;
       wss.emit('connection', ws, req);
     });
   });
@@ -291,6 +340,88 @@ function createApp(options = {}) {
   if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   // -------------------------------------------------------------------
+  // Admin helpers
+  // -------------------------------------------------------------------
+
+  function adminSessionFor(req, url) {
+    const token = bearerToken(req) || url.searchParams.get('admin_token') || '';
+    if (!token) return null;
+    const session = adminSessions.get(token);
+    if (!session) return null;
+    if (session.expiresAt <= Date.now()) {
+      adminSessions.delete(token);
+      return null;
+    }
+    return session;
+  }
+
+  function adminState() {
+    const stats = store.stats();
+    const users = Object.values(store.db.users)
+      .map((user) => ({
+        id: user.id,
+        nickname: user.nickname,
+        displayName: user.displayName,
+        deviceId: user.deviceId,
+        lastIp: user.lastIp || '',
+        lastIpAt: user.lastIpAt || 0,
+        createdAt: user.createdAt || 0,
+        lastSeenAt: user.lastSeenAt || 0,
+        creator: user.creator === true,
+        model: user.model || '',
+        online: (online.get(user.id)?.size || 0) > 0,
+        deviceBanned: !!store.findBan({ deviceId: user.deviceId }),
+        ipBanned: !!user.lastIp && !!store.findBan({ ip: user.lastIp }),
+      }))
+      .sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        return (b.lastSeenAt || 0) - (a.lastSeenAt || 0);
+      })
+      .slice(0, MAX_ADMIN_USERS);
+    const lobbyMessages = store.db.messages.reduce(
+      (count, message) => count + (message.to === null ? 1 : 0),
+      0,
+    );
+    return {
+      ok: true,
+      server: {
+        version: VERSION,
+        uptime: Math.round(process.uptime()),
+        apk: fs.existsSync(apkPath),
+        serverTime: Date.now(),
+      },
+      stats: {
+        users: stats.users,
+        messages: stats.messages,
+        online: onlineCount(),
+        lobbyMessages,
+      },
+      users,
+      bans: store.banList(),
+      notice: store.getNotice(),
+    };
+  }
+
+  function enforceBan(kind, value) {
+    for (const ws of wss.clients) {
+      if (!ws.user || ws.readyState !== WebSocket.OPEN) continue;
+      const match = kind === 'ip' ? ws.remoteIp === value : ws.user.deviceId === value;
+      if (!match) continue;
+      send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'banned',
+        message: 'Доступ заблокирован администратором',
+      });
+      try {
+        ws.close(4004, 'banned');
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------
   // HTTP
   // -------------------------------------------------------------------
 
@@ -322,6 +453,136 @@ function createApp(options = {}) {
         online: onlineCount(),
         apk: fs.existsSync(apkPath),
       });
+      return;
+    }
+
+    if (pathname === '/api/admin/login' && req.method === 'POST') {
+      if (!allowAdmin(ip, 10)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
+      if (!adminPassword) {
+        return sendJson(res, 503, {
+          ok: false,
+          error: 'admin_disabled',
+          message: 'Пароль администратора не настроен на сервере',
+        });
+      }
+      const body = await readJson(req);
+      const password = String(body.password || '');
+      if (!safeEqualText(password, adminPassword)) {
+        return sendJson(res, 403, { ok: false, error: 'bad_password' });
+      }
+      const token = crypto.randomBytes(32).toString('base64url');
+      const expiresAt = Date.now() + ADMIN_SESSION_MS;
+      adminSessions.set(token, { ip, createdAt: Date.now(), expiresAt });
+      log(`admin: вход с ${ip}`);
+      sendJson(res, 200, { ok: true, token, expiresAt });
+      return;
+    }
+
+    if (pathname === '/api/admin/state' && req.method === 'GET') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      sendJson(res, 200, adminState());
+      return;
+    }
+
+    if (pathname === '/api/admin/lobby/clear' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const removed = store.clearLobby();
+      for (const message of removed) removeMedia(message.image);
+      broadcast({ v: VERSION, type: 'lobby_cleared', at: Date.now() });
+      log(`admin: очищен общий чат (${removed.length}) с ${session.ip}`);
+      sendJson(res, 200, { ok: true, removed: removed.length });
+      return;
+    }
+
+    if (pathname === '/api/admin/ban' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const body = await readJson(req);
+      const kind = body.kind === 'ip' ? 'ip' : body.kind === 'device' ? 'device' : '';
+      const value = String(body.value || '').trim().slice(0, kind === 'ip' ? 64 : MAX_DEVICE_ID);
+      if (!kind || !value) return sendJson(res, 400, { ok: false, error: 'value_required' });
+      if (kind === 'ip' && !net.isIP(value)) {
+        return sendJson(res, 400, { ok: false, error: 'bad_ip', message: 'Некорректный IP-адрес' });
+      }
+      if (kind === 'device' && value.length < 4) {
+        return sendJson(res, 400, { ok: false, error: 'bad_device', message: 'Слишком короткий ID устройства' });
+      }
+      const reason = String(body.reason || '').slice(0, MAX_BAN_REASON);
+      const ban = store.addBan({ kind, value, reason, createdAt: Date.now() });
+      enforceBan(kind, value);
+      log(`admin: бан ${kind} ${value} (${reason || 'без причины'}) с ${session.ip}`);
+      sendJson(res, 200, { ok: true, ban, bans: store.banList() });
+      return;
+    }
+
+    if (pathname === '/api/admin/unban' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const body = await readJson(req);
+      const kind = body.kind === 'ip' ? 'ip' : body.kind === 'device' ? 'device' : '';
+      const value = String(body.value || '').trim();
+      if (!kind || !value) return sendJson(res, 400, { ok: false, error: 'value_required' });
+      const removed = store.removeBan(kind, value);
+      log(`admin: разбан ${kind} ${value} с ${session.ip}`);
+      sendJson(res, 200, { ok: true, removed, bans: store.banList() });
+      return;
+    }
+
+    if (pathname === '/api/admin/kick' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const body = await readJson(req);
+      const userId = String(body.userId || '').trim().slice(0, 64);
+      if (!userId) return sendJson(res, 400, { ok: false, error: 'user_required' });
+      let kicked = 0;
+      for (const target of online.get(userId) || []) {
+        if (target.readyState === WebSocket.OPEN) {
+          send(target, {
+            v: VERSION,
+            type: 'error',
+            code: 'kicked',
+            message: 'Сеанс завершён администратором',
+          });
+          try {
+            target.close(4005, 'kicked by admin');
+            kicked += 1;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      log(`admin: отключён пользователь ${userId} с ${session.ip}`);
+      sendJson(res, 200, { ok: true, kicked });
+      return;
+    }
+
+    if (pathname === '/api/admin/notice' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const body = await readJson(req);
+      const notice = {
+        id: crypto.randomBytes(8).toString('hex'),
+        title: String(body.title || '').trim().slice(0, 120) || 'Обновление UltraChat',
+        text: String(body.text || '').trim().slice(0, 1000),
+        version: String(body.version || '').trim().slice(0, 32),
+        url: sanitizeNoticeUrl(body.url),
+        createdAt: Date.now(),
+      };
+      store.setNotice(notice);
+      broadcast({ v: VERSION, type: 'notice', ...notice });
+      log(`admin: уведомление ${notice.id} отправлено с ${session.ip}`);
+      sendJson(res, 200, { ok: true, notice });
+      return;
+    }
+
+    if (pathname === '/api/admin/notice/clear' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      store.clearNotice();
+      broadcast({ v: VERSION, type: 'notice_cleared' });
+      sendJson(res, 200, { ok: true });
       return;
     }
 
@@ -361,6 +622,15 @@ function createApp(options = {}) {
       if (!nickname) {
         return sendJson(res, 400, { ok: false, error: 'nickname_required' });
       }
+      const registerBan = store.findBan({ deviceId, ip });
+      if (registerBan) {
+        return sendJson(res, 403, {
+          ok: false,
+          error: 'banned',
+          message: 'Доступ заблокирован администратором',
+          ban: { kind: registerBan.kind, reason: registerBan.reason || '' },
+        });
+      }
       const avatarId = normalizeAvatar(body.avatarId ?? body.avatar);
       const creator = body.creator === true;
       const model = String(body.model || '').slice(0, 64);
@@ -385,6 +655,8 @@ function createApp(options = {}) {
         avatarId,
         creator,
         model,
+        lastIp: ip,
+        lastIpAt: Date.now(),
       });
       sendJson(res, 200, {
         ok: true,
@@ -403,6 +675,8 @@ function createApp(options = {}) {
       if (!allowIp(ip, 120)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
       const user = store.findByToken(url.searchParams.get('token') || bearerToken(req));
       if (!user) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const ban = store.findBan({ deviceId: user.deviceId, ip });
+      if (ban) return sendJson(res, 403, { ok: false, error: 'banned', message: 'Доступ заблокирован администратором' });
       sendJson(res, 200, { ok: true, ...rosterPayload() });
       return;
     }
@@ -413,6 +687,8 @@ function createApp(options = {}) {
       if (!allowIp(ip, 120)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
       const user = store.findByToken(url.searchParams.get('token') || bearerToken(req));
       if (!user) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const ban = store.findBan({ deviceId: user.deviceId, ip });
+      if (ban) return sendJson(res, 403, { ok: false, error: 'banned', message: 'Доступ заблокирован администратором' });
       const query = String(url.searchParams.get('q') || '')
         .trim()
         .toLowerCase()
@@ -439,6 +715,8 @@ function createApp(options = {}) {
       if (!allowIp(ip, 120)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
       const user = store.findByToken(url.searchParams.get('token') || bearerToken(req));
       if (!user) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const ban = store.findBan({ deviceId: user.deviceId, ip });
+      if (ban) return sendJson(res, 403, { ok: false, error: 'banned', message: 'Доступ заблокирован администратором' });
       const rawPeer = url.searchParams.get('peer');
       let peer = null;
       if (rawPeer && rawPeer !== 'lobby') {
@@ -613,6 +891,20 @@ function createApp(options = {}) {
       ws.close(4003, 'device mismatch');
       return;
     }
+    const helloBan = store.findBan({ deviceId: user.deviceId, ip: ws.remoteIp });
+    if (helloBan) {
+      send(ws, {
+        v: VERSION,
+        type: 'error',
+        code: 'banned',
+        message: 'Доступ заблокирован администратором',
+      });
+      ws.close(4004, 'banned');
+      return;
+    }
+    if (user.lastIp !== ws.remoteIp) {
+      store.updateUser(user, { lastIp: ws.remoteIp, lastIpAt: Date.now() });
+    }
     const nickname = normalizeNickname(frame.nickname) || user.nickname;
     const creator = frame.creator === true;
     const avatarId = normalizeAvatar(frame.avatar);
@@ -642,6 +934,10 @@ function createApp(options = {}) {
       peer: 'lobby',
       messages: store.history({ userId: user.id, peer: null, limit: 50 }),
     });
+    const notice = store.getNotice();
+    if (notice && Date.now() - Number(notice.createdAt || 0) < NOTICE_TTL_MS) {
+      send(ws, { v: VERSION, type: 'notice', ...notice });
+    }
     // Догоняем личные переписки, пока устройство было офлайн.
     const pendingPeers = new Set();
     for (const message of store.db.messages) {
@@ -1015,10 +1311,28 @@ function createApp(options = {}) {
     return entry.count <= maxPerMinute;
   }
 
+  /** Отдельный счётчик, чтобы обычные запросы не расходовали лимит входа в панель. */
+  function allowAdmin(ip, maxPerMinute) {
+    const now = Date.now();
+    let entry = adminHits.get(ip);
+    if (!entry || now - entry.start > 60_000) {
+      entry = { start: now, count: 0 };
+      adminHits.set(ip, entry);
+    }
+    entry.count += 1;
+    return entry.count <= maxPerMinute;
+  }
+
   const ipCleanup = setInterval(() => {
     const now = Date.now();
     for (const [ip, entry] of ipHits) {
       if (now - entry.start > 5 * 60_000) ipHits.delete(ip);
+    }
+    for (const [ip, entry] of adminHits) {
+      if (now - entry.start > 5 * 60_000) adminHits.delete(ip);
+    }
+    for (const [token, session] of adminSessions) {
+      if (session.expiresAt <= now) adminSessions.delete(token);
     }
   }, 60_000);
   if (typeof ipCleanup.unref === 'function') ipCleanup.unref();

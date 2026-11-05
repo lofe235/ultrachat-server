@@ -3732,7 +3732,7 @@
         <form class="admin-form" id="admin-notice-form" autocomplete="off">
           <div class="admin-form-grid">
             <label class="admin-field"><span>Заголовок</span><input id="admin-notice-title" type="text" maxlength="120" placeholder="Доступно обновление UltraChat"></label>
-            <label class="admin-field"><span>Версия</span><input id="admin-notice-version" type="text" maxlength="32" placeholder="1.7.2"></label>
+            <label class="admin-field"><span>Версия</span><input id="admin-notice-version" type="text" maxlength="32" placeholder="1.8.1"></label>
           </div>
           <label class="admin-field"><span>Текст уведомления</span><textarea id="admin-notice-text" rows="3" maxlength="1000" placeholder="Установите новую версию приложения"></textarea></label>
           <label class="admin-field"><span>Ссылка на APK или страницу</span><input id="admin-notice-url" type="text" maxlength="500" placeholder="/download/UltraChat.apk"></label>

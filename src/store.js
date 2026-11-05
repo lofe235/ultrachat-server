@@ -216,6 +216,24 @@ class Store {
   }
 
   /**
+   * Полностью удаляет аккаунт и все сообщения, где он был отправителем
+   * или получателем. Устройство после этого может зарегистрироваться заново.
+   */
+  deleteUser(userId) {
+    const user = this.db.users[userId];
+    if (!user) return null;
+    delete this.db.users[userId];
+    const removedMessages = [];
+    this.db.messages = this.db.messages.filter((message) => {
+      const match = message.from === userId || message.to === userId;
+      if (match) removedMessages.push(message);
+      return !match;
+    });
+    this.scheduleSave();
+    return { user, messages: removedMessages };
+  }
+
+  /**
    * Очистка общего чата (лобби). Личные переписки не затрагиваются.
    * Возвращает удалённые сообщения, чтобы вызывающая сторона почистила фото.
    */

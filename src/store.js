@@ -15,6 +15,23 @@ function emptyBans() {
 }
 
 /**
+ * Loopback-адреса на хостинге alwaysdata принадлежат reverse-proxy, а не
+ * пользователю: все клиенты приходят с ::1. Бан такого адреса заблокировал
+ * бы вообще всех, поэтому он никогда не должен срабатывать.
+ */
+function isLoopbackAddress(value) {
+  const ip = String(value || '').trim().toLowerCase();
+  if (!ip) return false;
+  if (ip === '::1' || ip === '::' || ip === '0.0.0.0') return true;
+  if (ip.startsWith('127.')) return true;
+  if (ip.startsWith('::ffff:')) {
+    const mapped = ip.slice(7);
+    return mapped.startsWith('127.') || mapped === '0.0.0.0';
+  }
+  return false;
+}
+
+/**
  * Простое файловое хранилище без нативных зависимостей.
  * Запись атомарная: сначала temp-файл, затем rename.
  */
@@ -43,6 +60,13 @@ class Store {
           },
           notice: parsed.notice && typeof parsed.notice === 'object' ? parsed.notice : null,
         };
+        // Старые версии могли сохранить бан ::1. Такой бан блокирует всех,
+        // поэтому молча вычищаем его при загрузке базы.
+        const before = this.db.bans.ips.length;
+        this.db.bans.ips = this.db.bans.ips.filter(
+          (item) => !isLoopbackAddress(item && item.value),
+        );
+        if (this.db.bans.ips.length !== before) this.scheduleSave();
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -262,7 +286,7 @@ class Store {
       const found = this.db.bans.devices.find((item) => item.value === deviceId);
       if (found) return { ...found, kind: 'device' };
     }
-    if (ip) {
+    if (ip && !isLoopbackAddress(ip)) {
       const found = this.db.bans.ips.find((item) => item.value === ip);
       if (found) return { ...found, kind: 'ip' };
     }
@@ -349,4 +373,4 @@ function displayName(nickname, creator) {
   return creator ? `[Создатель] ${nickname}` : nickname;
 }
 
-module.exports = { Store, hashToken, displayName, MAX_MESSAGES };
+module.exports = { Store, hashToken, displayName, isLoopbackAddress, MAX_MESSAGES };

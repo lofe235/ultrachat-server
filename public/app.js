@@ -2,7 +2,7 @@
   'use strict';
 
   const VERSION = 1;
-  const APP_VERSION = '1.8.0 web';
+  const APP_VERSION = '1.8.1 web';
   const MAX_TEXT = 4000;
   const MAX_NICKNAME = 24;
   const CREATOR_CODE = '2252';
@@ -3442,6 +3442,18 @@
     return currentServer() || DEFAULT_SERVER;
   }
 
+  function isLoopbackIp(value) {
+    const ip = String(value || '').trim().toLowerCase();
+    return ip === '::1' || ip === '::' || ip === '0.0.0.0' ||
+      ip.startsWith('127.') ||
+      (ip.startsWith('::ffff:') && ip.slice(7).startsWith('127.'));
+  }
+
+  function sharedIpBanMessage() {
+    return 'IP ::1 — это адрес прокси хостинга, а не пользователя. ' +
+      'Бан такого IP заблокирует всех. Забаньте устройство.';
+  }
+
   function adminErrorText(code) {
     return {
       bad_password: 'Неверный пароль',
@@ -3449,6 +3461,7 @@
       admin_disabled: 'Пароль администратора не настроен на сервере',
       rate_limited: 'Слишком много попыток. Подождите минуту.',
       bad_ip: 'Некорректный IP-адрес',
+      ip_ban_unavailable: sharedIpBanMessage(),
       bad_device: 'Слишком короткий ID устройства',
       value_required: 'Укажите значение',
     }[String(code || '')] || '';
@@ -3662,6 +3675,7 @@
       const name = user.creator
         ? `${CREATOR_PREFIX} ${cleanDisplayName(user.displayName || user.nickname) || 'Без имени'}`
         : (cleanDisplayName(user.displayName || user.nickname) || 'Без имени');
+      const ipHidden = isLoopbackIp(user.lastIp);
       return `<div class="admin-user${user.online ? ' online' : ''}">
         <div class="admin-user-main">
           <div class="admin-user-name">
@@ -3671,12 +3685,12 @@
           </div>
           <div class="admin-user-meta">ID: <code class="admin-code">${adminEsc(user.id)}</code></div>
           <div class="admin-user-meta">Устройство: <code class="admin-code">${adminEsc(user.deviceId || '—')}</code>${user.deviceBanned ? ' <span class="admin-pill danger">забанено</span>' : ''}</div>
-          <div class="admin-user-meta">IP: <code class="admin-code">${adminEsc(user.lastIp || '—')}</code>${user.ipBanned ? ' <span class="admin-pill danger">забанен</span>' : ''}</div>
+          <div class="admin-user-meta">IP: <code class="admin-code">${adminEsc(ipHidden ? 'скрыт хостингом' : (user.lastIp || '—'))}</code>${user.ipBanned && !ipHidden ? ' <span class="admin-pill danger">забанен</span>' : ''}</div>
           <div class="admin-user-meta admin-muted">Последний вход: ${adminEsc(adminDate(user.lastSeenAt))} · регистрация: ${adminEsc(adminDate(user.createdAt))}${user.model ? ` · ${adminEsc(user.model)}` : ''}</div>
         </div>
         <div class="admin-user-actions">
           <button class="admin-mini" type="button" data-action="admin-ban-device" data-value="${adminAttr(user.deviceId || '')}" data-name="${adminAttr(name)}"${user.deviceBanned || !user.deviceId ? ' disabled' : ''}>${user.deviceBanned ? 'Устройство забанено' : 'Бан устройства'}</button>
-          <button class="admin-mini" type="button" data-action="admin-ban-ip" data-value="${adminAttr(user.lastIp || '')}" data-name="${adminAttr(name)}"${user.ipBanned || !user.lastIp ? ' disabled' : ''}>${user.ipBanned ? 'IP забанен' : 'Бан IP'}</button>
+          <button class="admin-mini" type="button" data-action="admin-ban-ip" data-value="${adminAttr(user.lastIp || '')}" data-name="${adminAttr(name)}"${user.ipBanned || !user.lastIp || ipHidden ? ' disabled' : ''}>${user.ipBanned ? 'IP забанен' : ipHidden ? 'IP скрыт' : 'Бан IP'}</button>
           <button class="admin-mini" type="button" data-action="admin-kick" data-value="${adminAttr(user.id)}" data-name="${adminAttr(name)}"${user.online ? '' : ' disabled'}>Кик</button>
           <button class="admin-mini danger" type="button" data-action="admin-delete-user" data-value="${adminAttr(user.id)}" data-name="${adminAttr(name)}">Удалить аккаунт</button>
         </div>
@@ -3736,6 +3750,7 @@
           </div>
           <button class="admin-btn danger" type="submit">${icon('ban')}<span>Забанить</span></button>
         </form>
+        <p class="admin-hint">На хостинге alwaysdata реальные IP скрыты: у всех пользователей виден <code>::1</code>. Банить по IP нельзя — используйте ID устройства.</p>
         <div class="admin-bans">
           ${bansHtml || '<p class="admin-hint">Активных банов нет.</p>'}
         </div>
@@ -3780,6 +3795,10 @@
   }
 
   async function adminBan(kind, value, reason) {
+    if (kind === 'ip' && isLoopbackIp(value)) {
+      toast(sharedIpBanMessage(), { error: true, duration: 6000 });
+      return;
+    }
     if (state.admin.busy) return;
     adminSetBusy(true);
     try {
@@ -3798,6 +3817,10 @@
 
   function confirmAdminBan(kind, value, name) {
     if (!value) return;
+    if (kind === 'ip' && isLoopbackIp(value)) {
+      toast(sharedIpBanMessage(), { error: true, duration: 6000 });
+      return;
+    }
     const target = kind === 'ip' ? `IP ${value}` : `устройство «${name || value}»`;
     openDialog({
       icon: 'ban',
@@ -3940,7 +3963,13 @@
         toast('Укажите ID устройства или IP-адрес', { error: true });
         return true;
       }
-      adminBan(kind ? kind.value : 'device', value.value.trim(), reason ? reason.value.trim() : '');
+      const banKind = kind ? kind.value : 'device';
+      const banValue = value.value.trim();
+      if (banKind === 'ip' && isLoopbackIp(banValue)) {
+        toast(sharedIpBanMessage(), { error: true, duration: 6000 });
+        return true;
+      }
+      adminBan(banKind, banValue, reason ? reason.value.trim() : '');
       return true;
     }
     if (form.id === 'admin-notice-form') {

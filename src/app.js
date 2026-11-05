@@ -6,7 +6,7 @@ const net = require('node:net');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { WebSocketServer, WebSocket } = require('ws');
-const { Store, displayName } = require('./store');
+const { Store, displayName, isLoopbackAddress } = require('./store');
 
 const VERSION = 1;
 const MAX_TEXT = 4000;
@@ -403,6 +403,8 @@ function createApp(options = {}) {
   }
 
   function enforceBan(kind, value) {
+    // Страховка: loopback-адрес принадлежит прокси хостинга, а не клиенту.
+    if (kind === 'ip' && isLoopbackAddress(value)) return;
     for (const ws of wss.clients) {
       if (!ws.user || ws.readyState !== WebSocket.OPEN) continue;
       const match = kind === 'ip' ? ws.remoteIp === value : ws.user.deviceId === value;
@@ -505,6 +507,17 @@ function createApp(options = {}) {
       if (!kind || !value) return sendJson(res, 400, { ok: false, error: 'value_required' });
       if (kind === 'ip' && !net.isIP(value)) {
         return sendJson(res, 400, { ok: false, error: 'bad_ip', message: 'Некорректный IP-адрес' });
+      }
+      if (kind === 'ip' && isLoopbackAddress(value)) {
+        // alwaysdata проксирует всех через localhost, поэтому в панели у
+        // каждого пользователя виден ::1. Бан такого адреса выключил бы
+        // регистрацию и WebSocket вообще всем.
+        return sendJson(res, 400, {
+          ok: false,
+          error: 'ip_ban_unavailable',
+          message: 'На этом хостинге реальные IP скрыты: все клиенты видны как ::1. ' +
+            'IP-бан заблокировал бы всех. Забаньте устройство или ник.',
+        });
       }
       if (kind === 'device' && value.length < 4) {
         return sendJson(res, 400, { ok: false, error: 'bad_device', message: 'Слишком короткий ID устройства' });

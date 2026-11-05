@@ -2,7 +2,7 @@
   'use strict';
 
   const VERSION = 1;
-  const APP_VERSION = '1.7.2 web';
+  const APP_VERSION = '1.8.0 web';
   const MAX_TEXT = 4000;
   const MAX_NICKNAME = 24;
   const CREATOR_CODE = '2252';
@@ -3678,6 +3678,7 @@
           <button class="admin-mini" type="button" data-action="admin-ban-device" data-value="${adminAttr(user.deviceId || '')}" data-name="${adminAttr(name)}"${user.deviceBanned || !user.deviceId ? ' disabled' : ''}>${user.deviceBanned ? 'Устройство забанено' : 'Бан устройства'}</button>
           <button class="admin-mini" type="button" data-action="admin-ban-ip" data-value="${adminAttr(user.lastIp || '')}" data-name="${adminAttr(name)}"${user.ipBanned || !user.lastIp ? ' disabled' : ''}>${user.ipBanned ? 'IP забанен' : 'Бан IP'}</button>
           <button class="admin-mini" type="button" data-action="admin-kick" data-value="${adminAttr(user.id)}" data-name="${adminAttr(name)}"${user.online ? '' : ' disabled'}>Кик</button>
+          <button class="admin-mini danger" type="button" data-action="admin-delete-user" data-value="${adminAttr(user.id)}" data-name="${adminAttr(name)}">Удалить аккаунт</button>
         </div>
       </div>`;
     }).join('');
@@ -3806,6 +3807,38 @@
       danger: true,
       onConfirm: () => {
         adminBan(kind, value, 'Заблокирован через панель');
+        return true;
+      },
+    });
+  }
+
+  async function adminDeleteUser(userId, name) {
+    if (state.admin.busy || !userId) return;
+    adminSetBusy(true);
+    try {
+      const data = await adminRequest('/api/admin/delete-user', {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      });
+      toast(`Аккаунт ${name || userId} удалён, сообщений: ${Number(data.removedMessages) || 0}`);
+      await loadAdminState(false);
+    } catch (err) {
+      toast(err.message || 'Не удалось удалить аккаунт', { error: true });
+    } finally {
+      adminSetBusy(false);
+    }
+  }
+
+  function confirmAdminDeleteUser(userId, name) {
+    if (!userId) return;
+    openDialog({
+      icon: 'trash',
+      title: 'Удалить аккаунт?',
+      body: `<div class="dialog-copy">Аккаунт «${escapeHtml(name || userId)}» и все его сообщения будут удалены безвозвратно. Пользователя сразу выкинет, и он сможет зарегистрироваться заново.</div>`,
+      confirmText: 'Удалить аккаунт',
+      danger: true,
+      onConfirm: () => {
+        adminDeleteUser(userId, name);
         return true;
       },
     });
@@ -4045,6 +4078,9 @@
         break;
       case 'admin-kick':
         adminKick(element.dataset.value || '', element.dataset.name || '');
+        break;
+      case 'admin-delete-user':
+        confirmAdminDeleteUser(element.dataset.value || '', element.dataset.name || '');
         break;
       case 'admin-notice-clear':
         adminClearNotice();

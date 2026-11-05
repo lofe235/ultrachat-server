@@ -669,3 +669,76 @@ test('admin can clear the lobby for everyone', async () => {
   await clientA.close();
   await clientB.close();
 });
+
+test('admin can delete an account and all its messages', async () => {
+  const alice = await register('Алиса Удаление');
+  const bob = await register('Боб Удаление');
+  const clientA = await connect(alice);
+  const clientB = await connect(bob);
+  await clientA.next('history', (f) => f.peer === 'lobby');
+  await clientB.next('history', (f) => f.peer === 'lobby');
+
+  clientA.send({
+    type: 'chat',
+    id: 'delete-account-dm',
+    to: bob.userId,
+    text: 'Привет, Боб',
+    ts: Date.now(),
+  });
+  await clientB.next('chat', (f) => f.id === 'delete-account-dm');
+  clientA.send({
+    type: 'chat',
+    id: 'delete-account-lobby',
+    text: 'Сообщение в общий чат',
+    ts: Date.now(),
+  });
+  await clientB.next('chat', (f) => f.id === 'delete-account-lobby');
+  clientB.send({
+    type: 'chat',
+    id: 'delete-account-lobby-bob',
+    text: 'Ответ Боба в общий чат',
+    ts: Date.now(),
+  });
+  await clientA.next('chat', (f) => f.id === 'delete-account-lobby-bob');
+
+  const login = await adminLogin();
+  const closePromise = new Promise((resolve) => clientB.ws.once('close', (code) => resolve(code)));
+  const response = await fetch(`${base}/api/admin/delete-user`, {
+    method: 'POST',
+    headers: adminHeaders(login.data.token),
+    body: JSON.stringify({ userId: bob.userId }),
+  });
+  const data = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(data.ok, true);
+  assert.ok(data.removedMessages >= 2);
+
+  const error = await clientB.next('error', (f) => f.code === 'account_deleted');
+  assert.equal(error.code, 'account_deleted');
+  assert.equal(await closePromise, 4006);
+
+  const stateResponse = await fetch(`${base}/api/admin/state`, {
+    headers: adminHeaders(login.data.token),
+  });
+  const state = await stateResponse.json();
+  assert.ok(!state.users.some((user) => user.id === bob.userId));
+
+  const again = await fetch(`${base}/api/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId: bob.deviceId, nickname: 'Боб Заново' }),
+  });
+  const againData = await again.json();
+  assert.equal(again.status, 200);
+  assert.equal(againData.ok, true);
+  assert.notEqual(againData.userId, bob.userId);
+
+  const missing = await fetch(`${base}/api/admin/delete-user`, {
+    method: 'POST',
+    headers: adminHeaders(login.data.token),
+    body: JSON.stringify({ userId: bob.userId }),
+  });
+  assert.equal(missing.status, 404);
+
+  await clientA.close();
+});

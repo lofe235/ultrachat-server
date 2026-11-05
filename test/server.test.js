@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 const { createApp } = require('../src/app');
+const { Store } = require('../src/store');
 
 let app;
 let base;
@@ -627,6 +628,49 @@ test('admin can ban and unban an IP address', async () => {
 
   const allowed = await registerFromIp(`ip-ban-allowed-${Date.now()}`, 'IP-Разбанен');
   assert.equal(allowed.status, 200);
+});
+
+test('admin cannot ban the shared loopback proxy address', async () => {
+  const login = await adminLogin();
+  const token = login.data.token;
+
+  for (const value of ['::1', '127.0.0.1', '0.0.0.0']) {
+    const response = await fetch(`${base}/api/admin/ban`, {
+      method: 'POST',
+      headers: adminHeaders(token),
+      body: JSON.stringify({ kind: 'ip', value, reason: 'нельзя' }),
+    });
+    assert.equal(response.status, 400, value);
+    const data = await response.json();
+    assert.equal(data.error, 'ip_ban_unavailable');
+  }
+
+  const state = await fetch(`${base}/api/admin/state`, { headers: adminHeaders(token) });
+  const stateData = await state.json();
+  assert.equal(stateData.bans.ips.length, 0);
+
+  // Главное: после попытки забанить ::1 обычная регистрация всё ещё работает.
+  const user = await register('После запрета IP-бана');
+  assert.ok(user.token);
+});
+
+test('legacy loopback IP ban is ignored and removed on load', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ultrachat-loopback-'));
+  fs.writeFileSync(path.join(dir, 'db.json'), JSON.stringify({
+    version: 1,
+    users: {},
+    messages: [],
+    bans: { devices: [], ips: [{ value: '::1', reason: 'legacy', createdAt: 1 }] },
+    notice: null,
+  }), 'utf8');
+
+  const store = new Store(dir);
+  assert.equal(store.banList().ips.length, 0);
+  // Даже если запись появится в памяти позже, findBan её проигнорирует.
+  store.db.bans.ips.push({ value: '::1', reason: 'runtime', createdAt: 2 });
+  assert.equal(store.findBan({ ip: '::1' }), null);
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('admin can clear the lobby for everyone', async () => {

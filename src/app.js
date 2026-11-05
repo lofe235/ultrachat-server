@@ -558,6 +558,41 @@ function createApp(options = {}) {
       return;
     }
 
+    if (pathname === '/api/admin/delete-user' && req.method === 'POST') {
+      const session = adminSessionFor(req, url);
+      if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const body = await readJson(req);
+      const userId = String(body.userId || '').trim().slice(0, 64);
+      if (!userId) return sendJson(res, 400, { ok: false, error: 'user_required' });
+      const removed = store.deleteUser(userId);
+      if (!removed) return sendJson(res, 404, { ok: false, error: 'unknown_user' });
+      for (const message of removed.messages) removeMedia(message.image);
+      let kicked = 0;
+      for (const target of online.get(userId) || []) {
+        if (target.readyState === WebSocket.OPEN) {
+          send(target, {
+            v: VERSION,
+            type: 'error',
+            code: 'account_deleted',
+            message: 'Аккаунт удалён администратором',
+          });
+          try {
+            target.close(4006, 'account deleted');
+            kicked += 1;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      online.delete(userId);
+      broadcastRoster();
+      log(
+        `admin: удалён аккаунт ${removed.user.nickname} (${userId}), сообщений: ${removed.messages.length}, сеансов: ${kicked} с ${session.ip}`,
+      );
+      sendJson(res, 200, { ok: true, kicked, removedMessages: removed.messages.length });
+      return;
+    }
+
     if (pathname === '/api/admin/notice' && req.method === 'POST') {
       const session = adminSessionFor(req, url);
       if (!session) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

@@ -133,6 +133,25 @@ function readJson(req, limit = MAX_BODY) {
   });
 }
 
+/** Читает тело запроса как байты. Нужно для загрузки фото отдельным HTTP-запросом. */
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('body too large'), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function bearerToken(req) {
   const header = req.headers.authorization;
   if (typeof header === 'string' && header.startsWith('Bearer ')) {
@@ -241,6 +260,12 @@ function createApp(options = {}) {
   });
 
   server.on('upgrade', (req, socket, head) => {
+    // Мелкие кадры (текст, ack) не должны ждать алгоритм Нейгла.
+    try {
+      socket.setNoDelay(true);
+    } catch {
+      /* сокет уже закрыт */
+    }
     let url;
     try {
       url = new URL(req.url, 'http://localhost');
@@ -719,6 +744,36 @@ function createApp(options = {}) {
       return;
     }
 
+    // Загрузка фото отдельным HTTP-запросом. Так большой base64-кадр не
+    // блокирует WebSocket, и текст в любом чате уходит сразу.
+    if (pathname === '/api/media' && req.method === 'POST') {
+      if (!allowIp(ip, 120)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
+      const user = store.findByToken(url.searchParams.get('token') || bearerToken(req));
+      if (!user) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+      const ban = store.findBan({ deviceId: user.deviceId, ip });
+      if (ban) {
+        return sendJson(res, 403, {
+          ok: false,
+          error: 'banned',
+          message: 'Доступ заблокирован администратором',
+        });
+      }
+      const buffer = await readBody(req, MAX_IMAGE_BYTES);
+      const ext = sniffImage(buffer);
+      if (!ext) {
+        return sendJson(res, 400, { ok: false, error: 'bad_image' });
+      }
+      const fileName = `${crypto.randomUUID()}.${ext}`;
+      try {
+        fs.writeFileSync(path.join(mediaDir, fileName), buffer);
+      } catch (err) {
+        log('media upload error:', err.message);
+        return sendJson(res, 500, { ok: false, error: 'media_failed' });
+      }
+      sendJson(res, 200, { ok: true, path: `/media/${fileName}` });
+      return;
+    }
+
     if (pathname === '/api/roster' && req.method === 'GET') {
       if (!allowIp(ip, 120)) return sendJson(res, 429, { ok: false, error: 'rate_limited' });
       const user = store.findByToken(url.searchParams.get('token') || bearerToken(req));
@@ -1023,28 +1078,52 @@ function createApp(options = {}) {
     const text = String(frame.text || '').trim().slice(0, MAX_TEXT);
     let imagePath = null;
     if (kind === 'image') {
-      const parsed = parseImagePayload(frame.image);
-      if (!parsed) {
-        return send(ws, {
-          v: VERSION,
-          type: 'error',
-          code: 'bad_image',
-          message: 'Фото не принято: нужен JPEG, PNG или WebP до 1,8 МБ',
-        });
+      // Новый клиент сначала загружает фото через POST /api/media и присылает
+      // готовый путь. Старый клиент по-прежнему может прислать base64.
+      const media = typeof frame.media === 'string' ? frame.media.trim() : '';
+      if (media) {
+        const name = media.startsWith('/media/') ? media.slice('/media/'.length) : '';
+        if (!/^[a-z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(name)) {
+          return send(ws, {
+            v: VERSION,
+            type: 'error',
+            code: 'bad_image',
+            message: 'Фото не принято: неверная ссылка',
+          });
+        }
+        if (!fs.existsSync(path.join(mediaDir, name))) {
+          return send(ws, {
+            v: VERSION,
+            type: 'error',
+            code: 'bad_image',
+            message: 'Фото не найдено, загрузите заново',
+          });
+        }
+        imagePath = `/media/${name}`;
+      } else {
+        const parsed = parseImagePayload(frame.image);
+        if (!parsed) {
+          return send(ws, {
+            v: VERSION,
+            type: 'error',
+            code: 'bad_image',
+            message: 'Фото не принято: нужен JPEG, PNG или WebP до 1,8 МБ',
+          });
+        }
+        const fileName = `${crypto.randomUUID()}.${parsed.ext}`;
+        try {
+          fs.writeFileSync(path.join(mediaDir, fileName), parsed.buffer);
+        } catch (err) {
+          log('media write error:', err.message);
+          return send(ws, {
+            v: VERSION,
+            type: 'error',
+            code: 'media_failed',
+            message: 'Не удалось сохранить фото',
+          });
+        }
+        imagePath = `/media/${fileName}`;
       }
-      const fileName = `${crypto.randomUUID()}.${parsed.ext}`;
-      try {
-        fs.writeFileSync(path.join(mediaDir, fileName), parsed.buffer);
-      } catch (err) {
-        log('media write error:', err.message);
-        return send(ws, {
-          v: VERSION,
-          type: 'error',
-          code: 'media_failed',
-          message: 'Не удалось сохранить фото',
-        });
-      }
-      imagePath = `/media/${fileName}`;
     } else if (!text) {
       return send(ws, { v: VERSION, type: 'error', code: 'empty_text', message: 'Пустое сообщение' });
     }

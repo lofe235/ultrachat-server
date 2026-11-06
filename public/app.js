@@ -3221,12 +3221,47 @@
     input.focus();
   }
 
-  function sendImage(peerId, dataUrl) {
+  function dataUrlToBlob(dataUrl) {
+    const comma = dataUrl.indexOf(',');
+    if (comma < 0) return null;
+    const match = /^data:([^;]+);base64$/i.exec(dataUrl.slice(0, comma));
+    if (!match) return null;
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: match[1] || 'image/jpeg' });
+  }
+
+  async function uploadChatPhoto(dataUrl) {
+    const blob = dataUrlToBlob(dataUrl);
+    const server = currentServer();
+    if (!blob || !server || !state.token) return null;
+    try {
+      const response = await fetch(`${server}/api/media`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${state.token}`,
+          'Content-Type': blob.type || 'image/jpeg',
+        },
+        body: blob,
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return typeof data.path === 'string' && data.path.startsWith('/media/') ? data.path : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function sendImage(peerId, dataUrl) {
     if (!peerId || !dataUrl) return;
     if (!state.connected) {
       toast('Нет связи с сервером. Фото не отправлено.', { error: true });
       return;
     }
+    // Сначала отдельная HTTP-загрузка, в WebSocket — только ссылка.
+    // Если сервер старый или загрузка не удалась, отправляем base64.
+    const mediaPath = await uploadChatPhoto(dataUrl);
     const id = makeId();
     const ts = Date.now();
     const lobbyMessage = isLobby(peerId);
@@ -3238,8 +3273,8 @@
       creator: !!(state.me && state.me.creator),
       text: '',
       kind: 'image',
-      image: null,
-      localImage: dataUrl,
+      image: mediaPath || null,
+      localImage: mediaPath ? null : dataUrl,
       ts,
       readAt: 0,
       editedAt: 0,
@@ -3253,7 +3288,8 @@
       id,
       text: '',
       kind: 'image',
-      image: dataUrl,
+      image: mediaPath ? null : dataUrl,
+      media: mediaPath || null,
       ts,
     });
   }
@@ -3310,7 +3346,7 @@
   async function compressChatPhoto(file) {
     const source = await readFileAsDataUrl(file);
     const image = await loadImage(source);
-    let maxSide = 1600;
+    let maxSide = 1024;
     let quality = 0.82;
     let result = '';
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -3329,7 +3365,7 @@
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(image, 0, 0, width, height);
       result = canvas.toDataURL('image/jpeg', quality);
-      if (dataUrlByteLength(result) <= 1_550_000) return result;
+      if (dataUrlByteLength(result) <= 300_000) return result;
       if (quality > 0.5) quality -= 0.1;
       else maxSide = Math.round(maxSide * 0.8);
     }

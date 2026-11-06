@@ -228,6 +228,90 @@ test('register + hello + roster + direct message', async () => {
   await clientB.close();
 });
 
+test('media upload + image message by path', async () => {
+  const alice = await register('Алиса Медиа');
+  const bob = await register('Боб Медиа');
+
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const unauthorized = await fetch(`${base}/api/media`, { method: 'POST', body: png });
+  assert.equal(unauthorized.status, 401);
+
+  const upload = await fetch(`${base}/api/media?token=${encodeURIComponent(alice.token)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'image/png' },
+    body: png,
+  });
+  const uploaded = await upload.json();
+  assert.equal(upload.status, 200, JSON.stringify(uploaded));
+  assert.equal(uploaded.ok, true);
+  assert.match(uploaded.path, /^\/media\/[a-z0-9_-]+\.png$/);
+
+  const served = await fetch(`${base}${uploaded.path}`);
+  assert.equal(served.status, 200);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
+
+  const clientA = await connect(alice);
+  const clientB = await connect(bob);
+  clientA.send({
+    type: 'chat',
+    id: 'media-1',
+    to: bob.userId,
+    kind: 'image',
+    media: uploaded.path,
+    text: '',
+    ts: Date.now(),
+  });
+
+  const received = await clientB.next('chat', (f) => f.id === 'media-1');
+  assert.equal(received.kind, 'image');
+  assert.equal(received.image, uploaded.path);
+  const ack = await clientA.next('ack', (f) => f.id === 'media-1');
+  assert.equal(ack.delivered, true);
+
+  const historyResponse = await fetch(
+    `${base}/api/history?peer=${alice.userId}&token=${encodeURIComponent(bob.token)}`,
+  );
+  const history = await historyResponse.json();
+  assert.equal(history.messages[0].image, uploaded.path);
+
+  await clientA.close();
+  await clientB.close();
+});
+
+test('legacy base64 image still works', async () => {
+  const alice = await register('Алиса Base64');
+  const bob = await register('Боб Base64');
+  const clientA = await connect(alice);
+  const clientB = await connect(bob);
+
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  clientA.send({
+    type: 'chat',
+    id: 'legacy-image-1',
+    to: bob.userId,
+    kind: 'image',
+    image: png.toString('base64'),
+    text: '',
+    ts: Date.now(),
+  });
+
+  const received = await clientB.next('chat', (f) => f.id === 'legacy-image-1');
+  assert.equal(received.kind, 'image');
+  assert.match(received.image, /^\/media\/[a-z0-9_-]+\.png$/);
+  const served = await fetch(`${base}${received.image}`);
+  assert.equal(served.status, 200);
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
+
+  await clientA.close();
+  await clientB.close();
+});
+
 test('offline direct message is stored and delivered on reconnect', async () => {
   const alice = await register('Алиса Оффлайн');
   const bob = await register('Боб Оффлайн');

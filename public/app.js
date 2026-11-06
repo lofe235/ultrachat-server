@@ -2,7 +2,7 @@
   'use strict';
 
   const VERSION = 1;
-  const APP_VERSION = '1.8.1 web';
+  const APP_VERSION = '1.8.3 web';
   const MAX_TEXT = 4000;
   const MAX_NICKNAME = 24;
   const CREATOR_CODE = '2252';
